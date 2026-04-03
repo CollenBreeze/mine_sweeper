@@ -2,6 +2,7 @@
 
 import pygame
 
+from game import Minesweeper
 
 
 class Renderer():
@@ -34,32 +35,42 @@ class Renderer():
 
     def init(self):
         pygame.init()
-        self.font = pygame.font.SysFont('Arial', 25 , bold=True)
+        self.font = pygame.font.Font("QINGNIAO.ttf", 25)
         self.screen = pygame.display.set_mode((self.window_h, self.window_w))
         self.clock = pygame.time.Clock()
 
+    #作图+更新
     def draw(self):
+        self.screen.fill(self.Back_colors['shadow'])
         self.drawGrid()
         pygame.display.update()
 
-    #用于debug
-    def whereBugs(self):
+    #用于捕捉玩家操作
+    def catchEvent(self):
         return pygame.event.get()
 
+    #作图中的数字部分方法
     def addText(self,number,x,y):
-        self.screen.blit(self.font.render(str(number),True,color=self.Num_colors[number]),(x,y))
-        pygame.display.update()
+        self.screen.blit(self.font.render(str(number),True,(self.Num_colors[number])),(x,y))
 
+    #作图
     def drawGrid(self):
         j = 0
         for column in range(0,self.window_w,self.block_size):
             i = 0
             for row in range(0,self.window_h,self.block_size):
                 if self.state[i][j] == -1:
-                    pygame.draw.rect(self.screen,self.Back_colors['unopened'],self.block_size)
+                    pygame.draw.rect(surface=self.screen,color=self.Back_colors['unopened'],rect=(column,row,(self.block_size-1),(self.block_size-1)),border_radius=3)
                 if self.state[i][j] >= 0:
-                    pygame.draw.rect(self.screen,self.Back_colors['opened'],self.block_size)
+                    pygame.draw.rect(surface=self.screen,color=self.Back_colors['opened'],rect=(column,row,self.block_size,self.block_size))
                 if self.state[i][j] > 0:
                     self.addText(self.state[i][j],column+12,row+8)
                 i += 1
             j += 1
+
+if __name__ == '__main__':
+    test_env = Minesweeper(15,15,15)
+    test_renderer = Renderer(state=test_env.state)
+    test_renderer.state = test_env.state
+    print(test_renderer.catchEvent())
+    test_renderer.draw()

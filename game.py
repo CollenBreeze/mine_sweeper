@@ -7,7 +7,6 @@ from numpy import zeros , random , multiply , count_nonzero , add
 from numpy import int_ as intnp
 from numba import njit
 
-import game
 
 
 #游戏
@@ -96,14 +95,15 @@ def unfog_zeros(grid,fog,i,j):
                         que.append((r,c))
                     fog[r][c] = 1
 
-def speed_test(iterations=10000):
+#测试逻辑运行速度
+def speed_test(iterations=100000):
     start = time.perf_counter()
     for _ in range(iterations):
-        game = Minesweeper(10,10,10)
+        game = Minesweeper(10,10,2)
         game.choose(5,5)
     end = time.perf_counter()
     return end-start
 
 if __name__ == '__main__':
-    used_time = speed_test(50000)
+    used_time = speed_test()
     print(used_time)
