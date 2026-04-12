@@ -51,7 +51,7 @@ class Renderer():
 
     #作图中的数字部分方法
     def addText(self,number,x,y):
-        self.screen.blit(self.font.render(str(number),True,(self.Num_colors[number])),(x,y))
+        self.screen.blit(self.font.render(str(int(number)),True,(self.Num_colors[number])),(x,y))
 
     #作图
     def drawGrid(self):
