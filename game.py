@@ -10,7 +10,7 @@ from numba import njit
 
 
 #游戏
-class Minesweeper():
+class Minesweeper:
     def __init__(self,grid_width,grid_height,bomb_no):
 
         #grid -1雷 0空白 1-8雷数 生成后固定不变
@@ -23,17 +23,37 @@ class Minesweeper():
         self.bomb_no = bomb_no
         self.box_count = grid_width * grid_height
         self.uncovered_count = 0
+
         self.reset()
 
-    def reset(self):
-        self.grid = zeros((self.grid_height, self.grid_width),dtype=intnp)
-        self.fog = zeros((self.grid_height, self.grid_width),dtype=intnp)
-        self.state = zeros((self.grid_height, self.grid_width),dtype=intnp)
-        self.bomb_locs = random.choice(range(self.box_count),self.bomb_no,replace=False)
+    def get_mask(self):
+        # self.fog 是 0 的地方（未翻开），mask 设为 1
+        # self.fog 是 1 的地方（已翻开），mask 设为 0
+        # .flatten() 是为了把二维矩阵变成 AI 需要的一维数组
+        return (1 - self.fog).flatten().astype(np.float32)
+
+    def reset(self, new_bomb_no=None):
+        if new_bomb_no is not None:
+            self.bomb_no = new_bomb_no  # 允许动态改变雷数
+
+        self.grid = zeros((self.grid_width, self.grid_height))
+        self.fog = zeros((self.grid_width, self.grid_height))
+        self.bomb_locs = random.choice(self.box_count, self.bomb_no, replace=False)
         self.uncovered_count = 0
-        self.plant_bombs()      #埋炸弹
-        self.hint_maker()       #生成提示
-        self.update_state()     #用户获取状态更新
+
+        for loc in self.bomb_locs:
+            i = loc // self.grid_width
+            j = loc % self.grid_width
+            self.grid[i][j] = -1
+
+        for loc in self.bomb_locs:
+            i = loc // self.grid_width
+            j = loc % self.grid_width
+            for r in range(max(0, i - 1), min(self.grid_width, i + 2)):
+                for c in range(max(0, j - 1), min(self.grid_height, j + 2)):
+                    if self.grid[r][c] != -1:
+                        self.grid[r][c] += 1
+        self.update_state()
 
     #在用户选择完成，运算完成后，返回状态更新
     def update_state(self):
@@ -56,28 +76,51 @@ class Minesweeper():
         for r,c in self.bomb_locs:
             for i in range(r-1,r+2):
                 for j in range(c-1,c+2):
-                    if i > -1 and j > -1 and i < self.grid_width and j < self.grid_height and self.grid[i][j] != -1:
+                    if i > -1 and j > -1 and i < self.grid_height and j < self.grid_width and self.grid[i][j] != -1:
                         self.grid[i][j] += 1
 
     #玩家选择grid里的一个格子
-    def choose(self,i,j):
-
-        if self.grid[i][j] == 0:
-            unfog_zeros(self.grid,self.fog,i,j)
-            self.uncovered_count = count_nonzero(self.fog)
-            self.update_state()
-            if self.uncovered_count == self.box_count-self.bomb_no:
-                return self.state,True,1
-            return self.state,False,0.5
-        elif self.grid[i][j] > 0:
+    def choose(self, i, j):
+        # 1. 踩雷暴毙 (重罚)
+        if self.grid[i][j] == -1:
             self.fog[i][j] = 1
-            self.uncovered_count = count_nonzero(self.fog)
             self.update_state()
-            if self.uncovered_count == self.box_count-self.bomb_no:
-                return self.state,True,1
-            return self.state,False,0.5
+            return self.state, True, -1.0
+
+            # 2. 点到了已经翻开的格子 (虽然有Mask拦截，但为了防止死循环，若发生直接重罚并结束该局)
+        if self.fog[i][j] == 1:
+            return self.state, True, -1.0
+
+        old_uncovered = self.uncovered_count
+
+        # 3. 泛洪算法或普通点击
+        if self.grid[i][j] == 0:
+            unfog_zeros(self.grid, self.fog, i, j)
         else:
-            return self.state,True,-1
+            self.fog[i][j] = 1
+
+        self.update_state()
+        self.uncovered_count = count_nonzero(self.fog)
+        newly_opened = self.uncovered_count - old_uncovered
+
+        # 4. 胜利条件 (大奖)
+        if self.uncovered_count == self.box_count - self.bomb_no:
+            return self.state, True, 1.0
+
+        # 5. 安全步：奖励与翻开格子数成正比，但单步上限设为 0.5，防止超过赢局奖励
+        step_reward = min(0.05 * newly_opened, 0.5)
+        return self.state, False, step_reward
+
+    def step(self, action_idx):
+        # 1. 自动转换坐标
+        i = action_idx // self.grid_width
+        j = action_idx % self.grid_width
+
+        # 2. 调用你之前的 choose 方法
+        next_state, done, reward = self.choose(i, j)
+
+        # 3. 返回 AI 需要的一维数据
+        return next_state.flatten(), reward, done, self.get_mask()
 
 #对于0的部分，采用泛洪算法，使用堆栈的方法进行快速计算
 #pop（0）采用广度优先算法，（）采用深度优先算法
