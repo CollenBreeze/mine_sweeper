@@ -1,0 +1,22 @@
+{
+  "episodes": 100,
+  "batch_size": 32,
+  "gamma": 0.99,
+  "lr": 0.0002,
+  "weight_decay": 1e-05,
+  "epsilon_start": 1.0,
+  "epsilon_min": 0.08,
+  "epsilon_decay": 0.99985,
+  "learning_starts": 32,
+  "update_target_every": 1000,
+  "capacity_per_shape": 40000,
+  "teacher_window": 150,
+  "hidden_dim": 16,
+  "res_blocks": 1,
+  "log_every": 50,
+  "save_every": 100,
+  "checkpoint_name": "tempwarm.pt",
+  "metadata_name": "tempwarm.json",
+  "seed": 42,
+  "cpu_threads": 4
+}

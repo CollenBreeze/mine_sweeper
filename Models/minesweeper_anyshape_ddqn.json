@@ -1,0 +1,22 @@
+{
+  "episodes": 300000,
+  "batch_size": 128,
+  "gamma": 0.99,
+  "lr": 0.0002,
+  "weight_decay": 1e-05,
+  "epsilon_start": 0.1,
+  "epsilon_min": 0.05,
+  "epsilon_decay": 0.99995,
+  "learning_starts": 1000,
+  "update_target_every": 1000,
+  "capacity_per_shape": 40000,
+  "teacher_window": 150,
+  "hidden_dim": 64,
+  "res_blocks": 4,
+  "log_every": 250,
+  "save_every": 5000,
+  "checkpoint_name": "minesweeper_anyshape_ddqn.pt",
+  "metadata_name": "minesweeper_anyshape_ddqn.json",
+  "seed": 42,
+  "cpu_threads": 4
+}
