@@ -26,6 +26,16 @@ DEFAULT_BOARD_SPECS = [
 ]
 
 
+def resolve_resume_path(resume_from: str) -> Path:
+    path = Path(resume_from)
+    if path.exists():
+        return path
+    candidate = Path("Models") / resume_from
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(f"未找到续训 checkpoint: {resume_from}")
+
+
 def compute_td_loss(current_model, target_model, buffer, optimizer, batch_size, gamma, device):
     states, actions, masks, rewards, next_states, next_masks, dones, board_shape = buffer.sample(batch_size)
 
@@ -61,20 +71,52 @@ def train(args):
     set_seed(args.seed)
     if not torch.cuda.is_available():
         torch.backends.mkldnn.enabled = False
-        torch.set_num_threads(max(1, min(4, args.cpu_threads)))
-        torch.set_num_interop_threads(1)
+        try:
+            torch.set_num_threads(max(1, min(4, args.cpu_threads)))
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"开始训练！设备: {device}")
 
+    resume_payload = None
     board_specs = DEFAULT_BOARD_SPECS
+    episodes_finished_before = 0
+
+    if getattr(args, "resume_from", None):
+        resume_path = resolve_resume_path(args.resume_from)
+        resume_payload = torch.load(resume_path, map_location=device)
+        if not isinstance(resume_payload, dict) or "model_state_dict" not in resume_payload:
+            raise ValueError("续训仅支持包含 model_state_dict 的 checkpoint 文件")
+
+        board_specs = resume_payload.get("board_specs", DEFAULT_BOARD_SPECS)
+        model_cfg = resume_payload.get("model_config", {})
+        args.hidden_dim = int(model_cfg.get("hidden_dim", args.hidden_dim))
+        args.res_blocks = int(model_cfg.get("res_blocks", args.res_blocks))
+        episodes_finished_before = int(resume_payload.get("episodes_finished", 0))
+        print(
+            f"🔁 继续训练: {resume_path} | 已完成局数: {episodes_finished_before} | "
+            f"hidden_dim={args.hidden_dim}, res_blocks={args.res_blocks}"
+        )
+
     teacher = MultiBoardTeacher(board_specs=board_specs, window_size=args.teacher_window)
     model = DDQN(hidden_dim=args.hidden_dim, res_blocks=args.res_blocks).to(device)
     target_model = DDQN(hidden_dim=args.hidden_dim, res_blocks=args.res_blocks).to(device)
-    target_model.load_state_dict(model.state_dict())
+
+    if resume_payload is not None:
+        model.load_state_dict(resume_payload["model_state_dict"])
+        if "target_model_state_dict" in resume_payload:
+            target_model.load_state_dict(resume_payload["target_model_state_dict"])
+        else:
+            target_model.load_state_dict(model.state_dict())
+        epsilon = float(resume_payload.get("epsilon", args.epsilon_start))
+    else:
+        target_model.load_state_dict(model.state_dict())
+        epsilon = args.epsilon_start
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     buffer = MultiShapeBuffer(capacity_per_shape=args.capacity_per_shape)
 
-    epsilon = args.epsilon_start
     total_steps = 0
     running_losses = []
     group_rewards = []
@@ -123,7 +165,7 @@ def train(args):
                 is_win = True
 
             if total_steps >= args.learning_starts and buffer.can_sample(args.batch_size):
-                loss, sampled_shape = compute_td_loss(
+                loss, _ = compute_td_loss(
                     model, target_model, buffer, optimizer, args.batch_size, args.gamma, device
                 )
                 running_losses.append(loss)
@@ -139,12 +181,14 @@ def train(args):
         board_episode_counts[board_name] += 1
         board_win_counts[board_name] += int(is_win)
 
+        absolute_episode = episodes_finished_before + ep + 1
+
         if (ep + 1) % args.log_every == 0:
             avg_win_rate = group_wins / args.log_every
             avg_reward = float(np.mean(group_rewards)) if group_rewards else 0.0
             avg_loss = float(np.mean(running_losses[-200:])) if running_losses else 0.0
             print(
-                f"🎯 训练组 {(ep + 1) // args.log_every:03d} | 总局数: {ep + 1:05d} | "
+                f"🎯 训练组 {(ep + 1) // args.log_every:03d} | 总局数: {absolute_episode:05d} | "
                 f"平均胜率: {avg_win_rate:5.1%} | 平均得分: {avg_reward:6.3f} | "
                 f"平均损失: {avg_loss:7.4f} | 探索率(Eps): {epsilon:.3f}"
             )
@@ -172,7 +216,7 @@ def train(args):
                 },
                 "train_config": vars(args),
                 "board_specs": board_specs,
-                "episodes_finished": ep + 1,
+                "episodes_finished": absolute_episode,
                 "epsilon": epsilon,
             }
             torch.save(payload, checkpoint_path)
@@ -202,6 +246,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_every", type=int, default=5000)
     parser.add_argument("--checkpoint_name", type=str, default="minesweeper_anyshape_ddqn.pt")
     parser.add_argument("--metadata_name", type=str, default="minesweeper_anyshape_ddqn.json")
+    parser.add_argument("--resume_from", type=str, default="")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cpu_threads", type=int, default=4)
     train(parser.parse_args())

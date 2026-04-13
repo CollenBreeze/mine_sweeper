@@ -5,12 +5,13 @@ from game import Minesweeper
 
 
 class Renderer:
-    def __init__(self, state, font_path="QINGNIAO.ttf", block_size=40, auto_scale=True):
+    def __init__(self, state, font_path="QINGNIAO.ttf", block_size=40, auto_scale=True, ui_height=0):
         rows, cols = state.shape
         self.block_size = int(block_size)
         self.rows = int(rows)
         self.cols = int(cols)
-        self.window_h = self.rows * self.block_size
+        self.ui_height = max(0, int(ui_height))
+        self.window_h = self.rows * self.block_size + self.ui_height
         self.window_w = self.cols * self.block_size
         self.state = state
         self.font_path = font_path
@@ -25,6 +26,8 @@ class Renderer:
             'shadow': (128, 128, 128),
             'opened': (255, 255, 255),
             'unopened': (192, 192, 192),
+            'ui_panel': (70, 70, 70),
+            'ui_text': (255, 255, 255),
         }
         self.Num_colors = {
             1: (0, 0, 255),
@@ -42,6 +45,7 @@ class Renderer:
         pygame.init()
         font_file = self.font_path if os.path.exists(self.font_path) else pygame.font.get_default_font()
         self.font = pygame.font.Font(font_file, 25)
+        self.small_font = pygame.font.Font(font_file, 18)
 
         scaled_flag = getattr(pygame, 'SCALED', 0)
         flags = scaled_flag if self.auto_scale else 0
@@ -76,6 +80,19 @@ class Renderer:
 
     def draw(self):
         self.screen.fill(self.Back_colors['shadow'])
+        if self.ui_height > 0:
+            pygame.draw.rect(
+                self.screen,
+                self.Back_colors['ui_panel'],
+                (0, 0, self.window_w, self.ui_height),
+            )
+            pygame.draw.line(
+                self.screen,
+                self.Back_colors['opened'],
+                (0, self.ui_height - 1),
+                (self.window_w, self.ui_height - 1),
+                1,
+            )
         self.drawGrid()
         pygame.display.update()
 
@@ -86,6 +103,11 @@ class Renderer:
         txt = self.font.render(str(int(number)), True, self.Num_colors[number])
         rect = txt.get_rect(center=(x + self.block_size // 2, y + self.block_size // 2))
         self.screen.blit(txt, rect)
+
+    def addUiText(self, text, x, y, small=True):
+        font = self.small_font if small else self.font
+        txt = font.render(str(text), True, self.Back_colors['ui_text'])
+        self.screen.blit(txt, (x, y))
 
     def normalize_mouse_pos(self, pos):
         self.refresh_display_metrics()
@@ -124,8 +146,12 @@ class Renderer:
         if not (0 <= lx < logical_w and 0 <= ly < logical_h):
             return None
 
+        if ly < self.ui_height:
+            return None
+
+        board_y = ly - self.ui_height
         col = int(lx // self.block_size)
-        row = int(ly // self.block_size)
+        row = int(board_y // self.block_size)
         if not (0 <= row < self.rows and 0 <= col < self.cols):
             return None
         return row, col
@@ -142,7 +168,7 @@ class Renderer:
         for row in range(rows):
             for col in range(cols):
                 x = col * self.block_size
-                y = row * self.block_size
+                y = self.ui_height + row * self.block_size
                 value = self.state[row, col]
                 if value == -1:
                     pygame.draw.rect(
@@ -163,7 +189,7 @@ class Renderer:
 
 if __name__ == '__main__':
     test_env = Minesweeper(10, 16, 15)
-    test_renderer = Renderer(state=test_env.state)
+    test_renderer = Renderer(state=test_env.state, ui_height=60)
     test_renderer.state = test_env.state
     print(test_renderer.catchEvent())
     print(test_renderer.scale_debug_string())

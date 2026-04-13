@@ -1,6 +1,6 @@
 import time
 import numpy as np
-from numpy import zeros, random, multiply, count_nonzero, add
+from numpy import add, count_nonzero, multiply, random, zeros
 
 try:
     from numba import njit
@@ -19,6 +19,7 @@ class Minesweeper:
     - grid/state 的 shape 始终是 (grid_height, grid_width)，即 (行, 列)
     - flatten 后的动作索引采用标准 row-major：idx = row * grid_width + col
     - 铺空白仍然沿用原来的 njit + 栈式泛洪算法，不改逻辑，只修坐标约定
+    - 新规则：首次点击一定不是雷
     """
 
     def __init__(self, grid_width, grid_height, bomb_no):
@@ -27,25 +28,15 @@ class Minesweeper:
         self.bomb_no = int(bomb_no)
         self.box_count = self.grid_width * self.grid_height
         self.uncovered_count = 0
+        self.first_click_done = False
         self.reset()
 
     def get_mask(self, flatten=True):
         mask = (1 - self.fog).astype(np.float32)
         return mask.flatten() if flatten else mask
 
-    def reset(self, new_bomb_no=None):
-        if new_bomb_no is not None:
-            self.bomb_no = int(new_bomb_no)
-
-        if self.bomb_no < 1:
-            raise ValueError("bomb_no 至少为 1")
-        if self.bomb_no >= self.box_count:
-            raise ValueError("bomb_no 必须小于总格子数，否则无可玩空间")
-
+    def _rebuild_grid_from_bombs(self):
         self.grid = zeros((self.grid_height, self.grid_width), dtype=np.float32)
-        self.fog = zeros((self.grid_height, self.grid_width), dtype=np.float32)
-        self.bomb_locs = random.choice(self.box_count, self.bomb_no, replace=False)
-        self.uncovered_count = 0
 
         for loc in self.bomb_locs:
             row = int(loc // self.grid_width)
@@ -60,6 +51,44 @@ class Minesweeper:
                     if self.grid[r, c] != -1:
                         self.grid[r, c] += 1
 
+    def _ensure_first_click_safe(self, row, col):
+        if self.first_click_done:
+            return
+
+        bomb_list = np.asarray(self.bomb_locs, dtype=np.int64)
+        clicked_idx = int(row * self.grid_width + col)
+        if clicked_idx not in set(bomb_list.tolist()):
+            self.first_click_done = True
+            return
+
+        all_indices = np.arange(self.box_count, dtype=np.int64)
+        available = np.setdiff1d(all_indices, bomb_list, assume_unique=False)
+        if len(available) == 0:
+            raise RuntimeError("没有可用于挪走首点雷的安全格子")
+
+        new_idx = int(random.choice(available))
+        new_bomb_locs = bomb_list.copy()
+        replace_at = int(np.where(new_bomb_locs == clicked_idx)[0][0])
+        new_bomb_locs[replace_at] = new_idx
+        self.bomb_locs = new_bomb_locs
+        self._rebuild_grid_from_bombs()
+        self.first_click_done = True
+
+    def reset(self, new_bomb_no=None):
+        if new_bomb_no is not None:
+            self.bomb_no = int(new_bomb_no)
+
+        if self.bomb_no < 1:
+            raise ValueError("bomb_no 至少为 1")
+        if self.bomb_no >= self.box_count:
+            raise ValueError("bomb_no 必须小于总格子数，否则无可玩空间")
+
+        self.fog = zeros((self.grid_height, self.grid_width), dtype=np.float32)
+        self.bomb_locs = np.asarray(random.choice(self.box_count, self.bomb_no, replace=False), dtype=np.int64)
+        self.uncovered_count = 0
+        self.first_click_done = False
+
+        self._rebuild_grid_from_bombs()
         self.update_state()
         return self.state
 
@@ -87,12 +116,14 @@ class Minesweeper:
         if row < 0 or row >= self.grid_height or col < 0 or col >= self.grid_width:
             return self.state, True, -1.0
 
+        if self.fog[row, col] == 1:
+            return self.state, True, -1.0
+
+        self._ensure_first_click_safe(row, col)
+
         if self.grid[row, col] == -1:
             self.fog[row, col] = 1
             self.update_state()
-            return self.state, True, -1.0
-
-        if self.fog[row, col] == 1:
             return self.state, True, -1.0
 
         old_uncovered = self.uncovered_count
